@@ -5,6 +5,7 @@ import Image from "next/image";
 export default function Home() {
   const [messages, setMessages] = useState<Array<{ text: string; isUser: boolean }>>([]);
   const [inputMessage, setInputMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -15,17 +16,44 @@ export default function Home() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (inputMessage.trim()) {
-      setMessages([...messages, { text: inputMessage, isUser: true }]);
+      // Add user message
+      setMessages(prev => [...prev, { text: inputMessage, isUser: true }]);
       setInputMessage('');
-      setTimeout(() => {
+      setIsLoading(true);
+
+      try {
+        // Send message to Ollama through our API route
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message: inputMessage }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to get response');
+        }
+
+        const data = await response.json();
+        
+        // Add AI response
         setMessages(prev => [...prev, { 
-          text: "This is a sample response. Connect to your backend to get real responses!", 
+          text: data.response, 
           isUser: false 
         }]);
-      }, 1000);
+      } catch (error) {
+        console.error('Error:', error);
+        setMessages(prev => [...prev, { 
+          text: "Sorry, I encountered an error. Please try again.", 
+          isUser: false 
+        }]);
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -65,6 +93,13 @@ export default function Home() {
                 </div>
               </div>
             ))}
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 text-black border border-gray-200 rounded-lg p-4">
+                  Thinking...
+                </div>
+              </div>
+            )}
             {/* Invisible div to scroll to */}
             <div ref={messagesEndRef} />
           </div>
@@ -81,10 +116,12 @@ export default function Home() {
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder="Type your message..."
               className="flex-1 rounded-lg border border-gray-300 p-4 focus:outline-none focus:ring-2 focus:ring-black text-black placeholder:text-gray-500"
+              disabled={isLoading}
             />
             <button
               type="submit"
-              className="rounded-lg bg-black px-6 py-4 text-white hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-black"
+              className="rounded-lg bg-black px-6 py-4 text-white hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-black disabled:bg-gray-400"
+              disabled={isLoading}
             >
               Send
             </button>
