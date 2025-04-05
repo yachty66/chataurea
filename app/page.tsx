@@ -6,6 +6,7 @@ export default function Home() {
   const [messages, setMessages] = useState<Array<{ text: string; isUser: boolean }>>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -21,38 +22,66 @@ export default function Home() {
     if (inputMessage.trim()) {
       // Add user message
       setMessages(prev => [...prev, { text: inputMessage, isUser: true }]);
+      const userMessage = inputMessage;
       setInputMessage('');
       setIsLoading(true);
 
       try {
-        // Send message to Ollama through our API route
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ message: inputMessage }),
+          body: JSON.stringify({ message: userMessage }),
         });
 
         if (!response.ok) {
           throw new Error('Failed to get response');
         }
 
-        const data = await response.json();
-        
-        // Add AI response
-        setMessages(prev => [...prev, { 
-          text: data.response, 
-          isUser: false 
-        }]);
+        // Create a new message for the AI response and start streaming
+        setMessages(prev => [...prev, { text: '', isUser: false }]);
+        setIsStreaming(true);
+        setIsLoading(false); // Remove the thinking indicator
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No reader available');
+
+        let accumulatedText = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const text = new TextDecoder().decode(value);
+          const chunks = text.split('data: ')
+            .filter(chunk => chunk.trim())
+            .map(chunk => chunk.replace(/\n/g, ''));
+
+          for (const chunk of chunks) {
+            accumulatedText += chunk;
+            setMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1].text = accumulatedText;
+              return newMessages;
+            });
+          }
+        }
       } catch (error) {
         console.error('Error:', error);
-        setMessages(prev => [...prev, { 
-          text: "Sorry, I encountered an error. Please try again.", 
-          isUser: false 
-        }]);
+        setMessages(prev => {
+          const newMessages = [...prev];
+          if (newMessages[newMessages.length - 1].text === '') {
+            newMessages.pop();
+          }
+          return [...newMessages, { 
+            text: "Sorry, I encountered an error. Please try again.", 
+            isUser: false 
+          }];
+        });
       } finally {
         setIsLoading(false);
+        setIsStreaming(false);
       }
     }
   };
@@ -93,7 +122,8 @@ export default function Home() {
                 </div>
               </div>
             ))}
-            {isLoading && (
+            {/* Only show thinking when loading and not streaming */}
+            {isLoading && !isStreaming && (
               <div className="flex justify-start">
                 <div className="bg-gray-100 text-black border border-gray-200 rounded-lg p-4">
                   Thinking...
@@ -116,12 +146,12 @@ export default function Home() {
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder="Type your message..."
               className="flex-1 rounded-lg border border-gray-300 p-4 focus:outline-none focus:ring-2 focus:ring-black text-black placeholder:text-gray-500"
-              disabled={isLoading}
+              disabled={isLoading || isStreaming}
             />
             <button
               type="submit"
               className="rounded-lg bg-black px-6 py-4 text-white hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-black disabled:bg-gray-400"
-              disabled={isLoading}
+              disabled={isLoading || isStreaming}
             >
               Send
             </button>
